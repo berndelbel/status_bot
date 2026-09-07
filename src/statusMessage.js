@@ -1,7 +1,8 @@
-import { ChannelType, PermissionsBitField, DiscordAPIError } from 'discord.js';
+import { DiscordAPIError } from 'discord.js';
 import { config } from './config.js';
-import { log } from './logger.js';
+import { log, describeError } from './logger.js';
 import { getMeta, setMeta, deleteMeta } from './db.js';
+import { resolveTextChannel } from './channel.js';
 import { buildStatusMessage } from './embed.js';
 import { getLastState } from './monitor.js';
 
@@ -10,38 +11,6 @@ export const META_CHANNEL = 'status_channel_id';
 
 let updating = false;
 let updateTimer = null;
-
-const REQUIRED_PERMS = [
-  PermissionsBitField.Flags.ViewChannel,
-  PermissionsBitField.Flags.SendMessages,
-  PermissionsBitField.Flags.EmbedLinks,
-  PermissionsBitField.Flags.AttachFiles,
-  PermissionsBitField.Flags.ReadMessageHistory,
-];
-
-async function resolveChannel(client) {
-  const channel = await client.channels.fetch(config.statusChannelId).catch(() => null);
-  if (!channel) {
-    log.error(`Channel ${config.statusChannelId} nicht gefunden. Stimmt die STATUS_CHANNEL_ID?`);
-    return null;
-  }
-  if (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement) {
-    log.error('Der konfigurierte Channel ist kein Textkanal.');
-    return null;
-  }
-
-  const me = channel.guild.members.me ?? (await channel.guild.members.fetchMe().catch(() => null));
-  if (!me) {
-    log.error('Eigenes Mitgliedsobjekt nicht abrufbar - Rechte konnten nicht geprüft werden.');
-    return null;
-  }
-  const missing = channel.permissionsFor(me)?.missing(REQUIRED_PERMS) ?? REQUIRED_PERMS;
-  if (missing.length > 0) {
-    log.error(`Dem Bot fehlen Rechte in #${channel.name}: ${missing.join(', ')}`);
-    return null;
-  }
-  return channel;
-}
 
 /** Holt die bestehende Status-Nachricht oder legt eine neue an. */
 async function getOrCreateMessage(channel, payload) {
@@ -74,7 +43,7 @@ export async function updateStatusMessage(client) {
     const state = getLastState();
     if (!state) return;
 
-    const channel = await resolveChannel(client);
+    const channel = await resolveTextChannel(client, config.statusChannelId, 'Status');
     if (!channel) return;
 
     const payload = buildStatusMessage(state);
@@ -89,7 +58,8 @@ export async function updateStatusMessage(client) {
       deleteMeta(META_MESSAGE);
       log.warn('Status-Nachricht nicht mehr vorhanden - wird neu erstellt.');
     } else {
-      log.error('Status-Nachricht konnte nicht aktualisiert werden:', err?.message ?? err);
+      log.error('Status-Nachricht konnte nicht aktualisiert werden:');
+      log.error(describeError(err));
     }
   } finally {
     updating = false;

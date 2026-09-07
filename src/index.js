@@ -4,6 +4,8 @@ import { log } from './logger.js';
 import { initDb, closeDb } from './db.js';
 import { monitor, startMonitor, stopMonitor, getLastState } from './monitor.js';
 import { startStatusUpdater, stopStatusUpdater, updateStatusMessage } from './statusMessage.js';
+import { startRankingUpdater, stopRankingUpdater } from './rankingMessage.js';
+import { startPlaytimeTracking, stopPlaytimeTracking } from './playtime.js';
 import { registerCommands, handleInteraction } from './commands.js';
 
 if (!validateConfig()) process.exit(1);
@@ -21,6 +23,8 @@ client.once(Events.ClientReady, async (c) => {
   await registerCommands();
   startMonitor();
   startStatusUpdater(client);
+  startPlaytimeTracking();
+  startRankingUpdater(client);
 });
 
 client.on(Events.InteractionCreate, (interaction) => handleInteraction(interaction, client));
@@ -62,6 +66,8 @@ async function shutdown(signal) {
   log.info(`${signal} empfangen - fahre herunter …`);
   stopMonitor();
   stopStatusUpdater();
+  stopRankingUpdater();
+  stopPlaytimeTracking();
   try {
     await client.destroy();
   } catch {

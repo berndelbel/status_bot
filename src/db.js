@@ -28,6 +28,27 @@ const SCHEMA = `
     key   TEXT PRIMARY KEY,
     value TEXT
   );
+
+  -- Spieler aus RCon. Schluessel ist die GUID, nicht der Name: so zaehlt ein
+  -- Namenswechsel weiter auf dasselbe Konto.
+  CREATE TABLE IF NOT EXISTS rcon_players (
+    guid       TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    first_seen INTEGER NOT NULL,
+    last_seen  INTEGER NOT NULL
+  );
+
+  -- Eine Zeile je Spielsitzung. ended = NULL bedeutet "laeuft noch".
+  CREATE TABLE IF NOT EXISTS rcon_sessions (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    guid      TEXT NOT NULL,
+    started   INTEGER NOT NULL,
+    last_seen INTEGER NOT NULL,
+    ended     INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_rcon_sessions_guid ON rcon_sessions (guid);
+  CREATE INDEX IF NOT EXISTS idx_rcon_sessions_time ON rcon_sessions (started, ended);
+  CREATE INDEX IF NOT EXISTS idx_rcon_sessions_open ON rcon_sessions (ended) WHERE ended IS NULL;
 `;
 
 export function initDb() {
@@ -171,4 +192,98 @@ export function pruneOldData() {
   const cutoff = Math.floor(Date.now() / 1000) - config.retentionDays * 86400;
   const res = db.prepare('DELETE FROM samples WHERE ts < ?').run(cutoff);
   if (res.changes > 0) log.debug(`${res.changes} alte Messungen geloescht (aelter als ${config.retentionDays} Tage)`);
+}
+
+// ------------------------------------------------------- Spielzeit (RCon)
+
+/** Legt den Spieler an oder aktualisiert Name und Zeitstempel. */
+export function upsertRconPlayer(guid, name, ts) {
+  db.prepare(
+    `INSERT INTO rcon_players (guid, name, first_seen, last_seen)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(guid) DO UPDATE SET
+       name      = excluded.name,
+       last_seen = excluded.last_seen`
+  ).run(guid, name, ts, ts);
+}
+
+/** GUIDs aller Sitzungen, die noch als laufend eingetragen sind. */
+export function getOpenSessions() {
+  return db.prepare('SELECT id, guid, started, last_seen FROM rcon_sessions WHERE ended IS NULL').all();
+}
+
+export function startSession(guid, ts) {
+  db.prepare('INSERT INTO rcon_sessions (guid, started, last_seen) VALUES (?, ?, ?)').run(guid, ts, ts);
+}
+
+/** Haelt eine laufende Sitzung am Leben. */
+export function touchSession(guid, ts) {
+  db.prepare('UPDATE rcon_sessions SET last_seen = ? WHERE guid = ? AND ended IS NULL').run(ts, guid);
+}
+
+/** Beendet eine laufende Sitzung. Ohne Zeitpunkt zaehlt der letzte Sichtkontakt. */
+export function closeSession(guid, ts = null) {
+  db.prepare(
+    'UPDATE rcon_sessions SET ended = COALESCE(?, last_seen) WHERE guid = ? AND ended IS NULL'
+  ).run(ts, guid);
+}
+
+/**
+ * Schliesst beim Start alle offenen Sitzungen am letzten Sichtkontakt.
+ * Waehrend der Bot aus war, ist unbekannt, wer wann ging - offen gelassene
+ * Sitzungen wuerden sonst die gesamte Ausfallzeit als Spielzeit anrechnen.
+ */
+export function closeStaleSessions() {
+  const res = db.prepare('UPDATE rcon_sessions SET ended = last_seen WHERE ended IS NULL').run();
+  if (res.changes > 0) log.info(`${res.changes} offene Sitzung(en) beim Start abgeschlossen.`);
+  return res.changes;
+}
+
+/**
+ * Spielzeit-Rangliste fuer ein Zeitfenster.
+ * Gezaehlt wird nur der Anteil jeder Sitzung, der wirklich im Fenster liegt.
+ */
+export function getPlaytimeRanking(sinceTs, nowTs, { limit = 10, offset = 0 } = {}) {
+  const rows = db
+    .prepare(
+      `SELECT s.guid                                    AS guid,
+              p.name                                    AS name,
+              SUM(MAX(0, MIN(COALESCE(s.ended, s.last_seen), ?)
+                       - MAX(s.started, ?)))            AS seconds,
+              COUNT(*)                                  AS sessions,
+              MAX(COALESCE(s.ended, s.last_seen))       AS lastOnline
+       FROM rcon_sessions s
+       JOIN rcon_players p ON p.guid = s.guid
+       WHERE COALESCE(s.ended, s.last_seen) >= ?
+       GROUP BY s.guid
+       HAVING seconds > 0
+       ORDER BY seconds DESC, name ASC
+       LIMIT ? OFFSET ?`
+    )
+    .all(nowTs, sinceTs, sinceTs, limit, offset);
+
+  const totals = db
+    .prepare(
+      `SELECT COUNT(*) AS players, COALESCE(SUM(seconds), 0) AS seconds FROM (
+         SELECT s.guid,
+                SUM(MAX(0, MIN(COALESCE(s.ended, s.last_seen), ?)
+                         - MAX(s.started, ?))) AS seconds
+         FROM rcon_sessions s
+         WHERE COALESCE(s.ended, s.last_seen) >= ?
+         GROUP BY s.guid
+         HAVING seconds > 0
+       )`
+    )
+    .get(nowTs, sinceTs, sinceTs);
+
+  return {
+    rows,
+    totalPlayers: totals?.players ?? 0,
+    totalSeconds: totals?.seconds ?? 0,
+  };
+}
+
+/** Anzahl aktuell laufender Sitzungen. */
+export function countActiveSessions() {
+  return db.prepare('SELECT COUNT(*) AS n FROM rcon_sessions WHERE ended IS NULL').get()?.n ?? 0;
 }

@@ -20,6 +20,25 @@ import {
 
 const CHART_FILE = 'verlauf.png';
 
+/** Zeichenlimits von Discord. Ein Ueberschreiten laesst das ganze Embed scheitern. */
+const LIMIT = {
+  title: 256,
+  description: 4096,
+  fieldName: 256,
+  fieldValue: 1024,
+};
+
+/**
+ * Kuerzt Text auf ein Discord-Limit.
+ * Servername, Karte und Ingame-Zeit stammen aus der Antwort des DayZ-Servers -
+ * also aus fremder Quelle. Ohne Begrenzung koennte ein ueberlanger Wert die
+ * gesamte Status-Nachricht blockieren.
+ */
+function clamp(text, max) {
+  const s = String(text ?? '');
+  return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+}
+
 /** Auslastungsbalken aus Blockzeichen - wirkt in Discord wie ein echter Progressbar. */
 function bar(value, max, width = 18) {
   if (!max || max <= 0) return '▱'.repeat(width);
@@ -61,8 +80,15 @@ export function buildStatusMessage(state) {
   const embed = new EmbedBuilder()
     .setColor(online ? config.accentColor : config.offlineColor)
     .setAuthor({ name: 'DayZ Serverstatus' })
-    .setTitle(`${online ? '🟢' : '🔴'}  ${state.name ?? config.serverNameOverride ?? 'DayZ Server'}`)
-    .setDescription(online ? onlineDescription(state, stats) : offlineDescription(state, stats))
+    .setTitle(
+      clamp(`${online ? '🟢' : '🔴'}  ${state.name ?? config.serverNameOverride ?? 'DayZ Server'}`, LIMIT.title)
+    )
+    .setDescription(
+      clamp(
+        online ? onlineDescription(state, stats) : offlineDescription(state, stats),
+        LIMIT.description
+      )
+    )
     .setImage(`attachment://${CHART_FILE}`)
     .setTimestamp(new Date())
     .setFooter({ text: `Aktualisiert alle ${config.updateInterval} Sekunden` });
@@ -193,7 +219,15 @@ function addFields(embed, state, stats) {
     inline: false,
   });
 
-  embed.addFields(fields);
+  // Zentral kappen statt an jeder einzelnen Stelle - so kann kein Feld das
+  // gesamte Embed zu Fall bringen.
+  embed.addFields(
+    fields.map((f) => ({
+      name: clamp(f.name, LIMIT.fieldName),
+      value: clamp(f.value, LIMIT.fieldValue),
+      inline: f.inline,
+    }))
+  );
 }
 
 function prettyMap(map) {
@@ -268,7 +302,7 @@ export function buildRangeMessage(rangeKey, state) {
 
   const embed = new EmbedBuilder()
     .setColor(config.accentColor)
-    .setTitle(`📊 Spielerverlauf · ${range.label}`)
+    .setTitle(clamp(`📊 Spielerverlauf · ${range.label}`, LIMIT.title))
     .setImage(`attachment://${CHART_FILE}`)
     .addFields(
       {

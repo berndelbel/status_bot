@@ -7,10 +7,13 @@ import {
   PermissionFlagsBits,
 } from 'discord.js';
 import { config } from './config.js';
-import { log } from './logger.js';
+import { log, describeError } from './logger.js';
 import { getLastState, pollOnce } from './monitor.js';
 import { buildStatusMessage, buildRangeMessage } from './embed.js';
+import { buildRankingMessage } from './ranking.js';
 import { updateStatusMessage, META_MESSAGE } from './statusMessage.js';
+import { updateRankingMessage, META_RANK_MESSAGE } from './rankingMessage.js';
+import { getOnlinePlayers, isRconConnected } from './playtime.js';
 import { deleteMeta } from './db.js';
 import { RANGES, collectStats, formatDuration, formatPercent, discordTime } from './stats.js';
 
@@ -42,8 +45,25 @@ export const commands = [
     .setDescription('Zeigt die aktuell verbundenen Spieler (sofern der Server sie preisgibt)'),
 
   new SlashCommandBuilder()
+    .setName('ranking')
+    .setDescription('Zeigt die Spielzeit-Rangliste')
+    .addIntegerOption((o) =>
+      o.setName('seite').setDescription('Welche Seite? (Standard: 1)').setMinValue(1)
+    ),
+
+  new SlashCommandBuilder()
     .setName('statusnachricht')
-    .setDescription('Erstellt die dauerhafte Status-Nachricht neu (nur Admins)')
+    .setDescription('Erstellt eine dauerhafte Nachricht neu (nur Admins)')
+    .addStringOption((o) =>
+      o
+        .setName('welche')
+        .setDescription('Welche Nachricht soll neu erstellt werden?')
+        .addChoices(
+          { name: 'Status', value: 'status' },
+          { name: 'Rangliste', value: 'ranking' },
+          { name: 'Beide', value: 'both' }
+        )
+    )
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 ].map((c) => c.toJSON());
 
@@ -86,7 +106,8 @@ export async function handleInteraction(interaction, client) {
     if (interaction.isButton()) return await handleButton(interaction, client);
     if (interaction.isStringSelectMenu()) return await handleSelect(interaction);
   } catch (err) {
-    log.error('Fehler bei einer Interaktion:', err?.message ?? err);
+    log.error('Fehler bei einer Interaktion:');
+    log.error(describeError(err));
     const reply = { content: '⚠️ Da ist etwas schiefgelaufen. Versuch es gleich noch einmal.', flags: EPHEMERAL };
     if (interaction.deferred || interaction.replied) {
       await interaction.followUp(reply).catch(() => {});
@@ -125,13 +146,34 @@ async function handleCommand(interaction, client) {
       return interaction.editReply({ embeds: [buildPlayerEmbed(state)] });
     }
 
+    case 'ranking': {
+      await interaction.deferReply({ flags: EPHEMERAL });
+      const page = interaction.options.getInteger('seite') ?? 1;
+      return interaction.editReply(buildRankingMessage(page));
+    }
+
     case 'statusnachricht': {
       await interaction.deferReply({ flags: EPHEMERAL });
-      deleteMeta(META_MESSAGE);
-      await updateStatusMessage(client);
-      return interaction.editReply({
-        content: '✅ Die Status-Nachricht wurde neu erstellt.',
-      });
+      const which = interaction.options.getString('welche') ?? 'status';
+      const done = [];
+
+      if (which === 'status' || which === 'both') {
+        deleteMeta(META_MESSAGE);
+        await updateStatusMessage(client);
+        done.push('Status-Nachricht');
+      }
+      if (which === 'ranking' || which === 'both') {
+        if (!config.rankingChannelId) {
+          return interaction.editReply({
+            content: '⚠️ Es ist keine `RANKING_CHANNEL_ID` konfiguriert.',
+          });
+        }
+        deleteMeta(META_RANK_MESSAGE);
+        await updateRankingMessage(client);
+        done.push('Rangliste');
+      }
+
+      return interaction.editReply({ content: `✅ Neu erstellt: ${done.join(' und ')}.` });
     }
 
     default:
@@ -140,6 +182,21 @@ async function handleCommand(interaction, client) {
 }
 
 async function handleButton(interaction, client) {
+  // Blaettern in der Rangliste.
+  if (interaction.customId.startsWith('rank:page:')) {
+    const page = Number.parseInt(interaction.customId.split(':')[2], 10) || 1;
+    const payload = buildRankingMessage(page);
+
+    // Kam der Klick aus einer privaten Antwort, dort weiterblaettern. Von der
+    // dauerhaften Nachricht aus privat antworten, damit die Seite nicht unter
+    // anderen Lesern wegspringt.
+    if (interaction.message?.flags?.has(MessageFlags.Ephemeral)) {
+      return interaction.update(payload);
+    }
+    return interaction.reply({ ...payload, flags: EPHEMERAL });
+  }
+  if (interaction.customId === 'rank:noop') return interaction.deferUpdate();
+
   switch (interaction.customId) {
     case 'status:refresh': {
       await interaction.deferReply({ flags: EPHEMERAL });
@@ -233,6 +290,16 @@ function buildUptimeEmbed() {
   return embed;
 }
 
+/**
+ * Entschaerft einen Spielernamen fuer die Ausgabe.
+ * Backticks und Zeilenumbrueche wuerden die Formatierung zerlegen - ein Spieler
+ * koennte sich sonst einen Namen geben, der die Anzeige kaputt macht.
+ */
+function sanitizeName(name) {
+  const clean = String(name ?? '').replace(/[`\r\n]/g, ' ').trim();
+  return clean === '' ? '(ohne Namen)' : clean;
+}
+
 function buildPlayerEmbed(state) {
   const embed = new EmbedBuilder().setColor(
     state.online ? config.accentColor : config.offlineColor
@@ -243,6 +310,26 @@ function buildPlayerEmbed(state) {
   }
 
   embed.setTitle(`👥 ${state.players} / ${state.maxPlayers} Spieler online`);
+
+  // RCon kennt die echten Namen - die Serverabfrage gibt bei DayZ keine preis.
+  const rconPlayers = isRconConnected() ? getOnlinePlayers() : [];
+  if (rconPlayers.length > 0) {
+    const names = rconPlayers
+      .map((p) => p.name)
+      .sort((a, b) => a.localeCompare(b, 'de'))
+      .slice(0, 60)
+      .map((n, i) => `\`${String(i + 1).padStart(2, ' ')}.\` ${sanitizeName(n)}`);
+
+    const blocks = [];
+    for (let i = 0; i < names.length; i += 20) blocks.push(names.slice(i, i + 20).join('\n'));
+    blocks.forEach((chunk, i) => {
+      embed.addFields({ name: i === 0 ? 'Verbunden' : '​', value: chunk, inline: true });
+    });
+    if (rconPlayers.length > 60) {
+      embed.setFooter({ text: `… und ${rconPlayers.length - 60} weitere` });
+    }
+    return embed;
+  }
 
   if (state.playerList.length === 0) {
     embed.setDescription(

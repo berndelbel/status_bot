@@ -11,7 +11,11 @@
     "start": "node --disable-warning=ExperimentalWarning src/index.js",
     "dev": "node --watch --disable-warning=ExperimentalWarning src/index.js",
     "selftest": "node --disable-warning=ExperimentalWarning scripts/selftest.js",
-    "preview": "node --disable-warning=ExperimentalWarning scripts/preview-chart.js"
+    "preview": "node --disable-warning=ExperimentalWarning scripts/preview-chart.js",
+    "invite": "node --disable-warning=ExperimentalWarning scripts/invite.js",
+    "diag:rcon": "node --disable-warning=ExperimentalWarning scripts/diag-rcon.js",
+    "diag:players": "node --disable-warning=ExperimentalWarning scripts/diag-players.js",
+    "selftest:ranking": "node --disable-warning=ExperimentalWarning scripts/selftest-ranking.js"
   },
   "license": "MIT",
   "dependencies": {
