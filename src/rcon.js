@@ -224,15 +224,22 @@ export class BattlEyeRcon extends EventEmitter {
  *   Players on server:
  *   [#] [IP Address]:[Port] [Ping] [GUID] [Name]
  *   --------------------------------------------------
- *   0   1.2.3.4:2304  35   abc123...(OK) SpielerName
- *   (1 players in total)
+ *   0   1.2.3.4:2304  35   abc123...(OK)  SpielerName
+ *   2   5.6.7.8:63455 64   def456...(?)   PD | Till
+ *   (2 players in total)
+ *
+ * Der Klammerausdruck hinter der GUID ist der Pruefstatus: "(OK)" nach
+ * erfolgreicher Pruefung, "(?)" solange sie noch laeuft. Beides muss erkannt
+ * werden - auf manchen Servern bleiben Spieler dauerhaft auf "(?)".
  *
  * IP-Adressen werden bewusst verworfen - fuer die Spielzeit reichen GUID und Name.
  */
 export function parsePlayers(text) {
   const players = [];
   for (const line of text.split('\n')) {
-    const m = line.match(/^\s*(\d+)\s+\S+:\d+\s+(-?\d+)\s+([0-9a-f]{32}|-)\s*\((\w+)\)\s*(.*?)\s*$/i);
+    const m = line.match(
+      /^\s*(\d+)\s+\S+:\d+\s+(-?\d+)\s+([0-9a-f]{32}|-)\s*\(([^)]*)\)\s*(.*?)\s*$/i
+    );
     if (!m) continue;
     const [, id, ping, guid, verified, rawName] = m;
     players.push({

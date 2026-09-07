@@ -15,7 +15,8 @@
     "invite": "node --disable-warning=ExperimentalWarning scripts/invite.js",
     "diag:rcon": "node --disable-warning=ExperimentalWarning scripts/diag-rcon.js",
     "diag:players": "node --disable-warning=ExperimentalWarning scripts/diag-players.js",
-    "selftest:ranking": "node --disable-warning=ExperimentalWarning scripts/selftest-ranking.js"
+    "selftest:ranking": "node --disable-warning=ExperimentalWarning scripts/selftest-ranking.js",
+    "selftest:rcon": "node scripts/selftest-rcon-parse.js"
   },
   "license": "MIT",
   "dependencies": {
