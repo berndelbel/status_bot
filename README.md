@@ -32,7 +32,8 @@ aufgezeichnet und beginnt sich ab dem ersten Start zu füllen.
 | `/uptime` | Verfügbarkeit und die letzten Ausfälle im Detail |
 | `/spieler` | Aktuell verbundene Spieler, sofern der Server Namen preisgibt |
 | `/ranking [seite]` | Spielzeit-Rangliste, blätterbar |
-| `/statusnachricht [welche]` | Erstellt Status-Nachricht und/oder Rangliste neu (nur Admins) |
+| `/willkommen` | Vorschau der Willkommensnachricht (nur Admins) |
+| `/statusnachricht [welche]` | Erstellt Status-Nachricht, Rangliste oder Rollen-Nachricht neu (nur Admins) |
 
 ## Einrichtung
 
@@ -255,11 +256,137 @@ Nachricht in diesem Channel. Sie zeigt immer die erste Seite; wer weiterblätter
 bekommt die Folgeseiten **privat** angezeigt. So springt die Seite nicht unter
 anderen Lesern weg.
 
+## Rollen zum Selbst-Aussuchen (optional)
+
+Eine Nachricht in einem eigenen Channel, in der sich Mitglieder per Knopfdruck
+selbst Rollen geben und wieder abnehmen.
+
+**Knoepfe statt Emoji-Reaktionen:** Klassische Reaction Roles brauchen einen
+zusaetzlichen Intent, greifen bei nicht zwischengespeicherten Nachrichten oft
+nicht und geben dem Nutzer keine Rueckmeldung. Knoepfe brauchen keine
+Sonderrechte, bestaetigen sofort und zeigen dem Klickenden privat, welche Rollen
+er gerade hat.
+
+### Einrichtung
+
+```bash
+cp config/roles.example.json config/roles.json
+```
+
+Rollen-IDs holst du in Discord per Rechtsklick auf die Rolle (*Servereinstellungen
+-> Rollen*) mit **ID kopieren**, bei aktiviertem Entwicklermodus. Dann in die
+`.env`:
+
+```
+ROLES_CHANNEL_ID=<Channel-ID>
+```
+
+Nach dem Neustart legt der Bot die Nachricht an. Aenderst du spaeter die
+`roles.json`, erneuerst du sie mit `/statusnachricht welche:Rollen`.
+
+### Zwei Voraussetzungen, an denen es fast immer haengt
+
+1. Der Bot braucht das Recht **Rollen verwalten**.
+2. Die **Bot-Rolle muss in der Rangfolge ueber allen Rollen stehen**, die er
+   vergeben soll. Discord verweigert die Vergabe sonst kommentarlos.
+
+Beides prueft der Bot beim Anlegen der Nachricht und meldet Probleme im Log
+namentlich - du musst nicht raten, welche Rolle klemmt.
+
+### Aufbau der roles.json
+
+```json
+{
+  "title": "Wähle deine Rollen",
+  "description": "Klick auf einen Knopf.",
+  "groups": [
+    {
+      "name": "🔔 Benachrichtigungen",
+      "roles": [
+        { "id": "123...", "label": "Server-News", "emoji": "📢", "description": "Ankündigungen" }
+      ]
+    }
+  ]
+}
+```
+
+`emoji` und `description` sind optional. Eigene Server-Emojis im Format
+`<:name:id>` funktionieren ebenfalls. Discord erlaubt hoechstens **25 Knoepfe**
+pro Nachricht; darueber hinausgehende Rollen werden weggelassen und im Log
+gemeldet.
+
+## Willkommensnachricht (optional)
+
+Begruesst neue Mitglieder in einem eigenen Channel - mit Avatar, Mitgliedsnummer
+und dem Alter des Discord-Kontos.
+
+### Wichtig: privilegierter Intent
+
+Sobald `WELCOME_CHANNEL_ID` gesetzt ist, braucht der Bot den Intent
+**SERVER MEMBERS**. Ohne ihn verweigert Discord die Anmeldung komplett - der Bot
+startet dann gar nicht mehr.
+
+1. [discord.com/developers](https://discord.com/developers/applications) oeffnen
+2. Deine App -> **Bot** -> **Privileged Gateway Intents**
+3. **SERVER MEMBERS INTENT** einschalten und speichern
+
+Der Bot fordert den Intent nur an, wenn `WELCOME_CHANNEL_ID` gefuellt ist. Laesst
+du die Zeile leer, bleibt alles wie bisher und es aendert sich nichts. Startet der
+Bot mit der Meldung `disallowed intents` nicht mehr, sagt das Log genau, was zu
+tun ist.
+
+### Einrichtung
+
+```bash
+cp config/welcome.example.json config/welcome.json
+```
+
+In der `.env`:
+
+```
+WELCOME_CHANNEL_ID=<Channel-ID>
+```
+
+Mit `/willkommen` bekommst du eine Vorschau mit deinem eigenen Profil - ohne dass
+jemand beitreten muss. Die Datei wird dabei jedes Mal frisch gelesen, du kannst
+also Texte anpassen und sofort nachschauen.
+
+### Platzhalter
+
+| Platzhalter | Wird ersetzt durch |
+| --- | --- |
+| `{user}` | Erwaehnung des neuen Mitglieds (pingt) |
+| `{username}` | Anzeigename ohne Erwaehnung |
+| `{server}` | Name des Discord-Servers |
+| `{count}` | aktuelle Mitgliederzahl |
+| `{serverip}` | IP und Port des DayZ-Servers aus der `.env` |
+
+Auf Channels verlinkst du mit `<#CHANNELID>`, auf Rollen mit `<@&ROLLENID>`.
+
+### Schalter in der welcome.json
+
+| Feld | Wirkung |
+| --- | --- |
+| `mentionUser` | Erwaehnt das Mitglied ueber dem Embed, sodass es einen Ping bekommt |
+| `showAvatar` | Profilbild oben rechts |
+| `showMemberCount` | "Mitglied Nr. 142" |
+| `showAccountAge` | Wann das Discord-Konto erstellt wurde - hilft, frische Zweitkonten zu erkennen |
+| `color` | `null` nimmt die `ACCENT_COLOR`, sonst z. B. `"#5865F2"` |
+| `image` | Banner unten im Embed, nur vollstaendige `https`-URLs |
+
+Fehlt die Datei oder ist sie fehlerhaft, benutzt der Bot Standardtexte statt
+auszufallen.
+
 ## Ohne Server testen
 
 ```bash
 npm run selftest          # Datenbank, Statistik, Graph und Status-Embed
 npm run selftest:ranking  # Rangliste, Blättern und Berechnung der Spielzeiten
+npm run selftest:rcon     # Parser der RCon-Spielerliste
+npm run selftest:updater  # Aktualisierung der Ranglisten-Nachricht
+npm run selftest:roles    # Rollen-Nachricht, Knöpfe und Discord-Limits
+npm run selftest:welcome  # Willkommensnachricht, Platzhalter und Limits
+npm run diag:sessions     # Zeigt erfasste Spielsitzungen im Detail
 npm run preview           # Rendert nur den Graphen nach scripts/preview.png
 npm run invite            # Baut die Einladungs-URL aus der CLIENT_ID
 npm run diag:players      # Zeigt, was die Serverabfrage preisgibt
@@ -286,6 +413,9 @@ Beide Skripte brauchen weder Discord-Token noch einen erreichbaren DayZ-Server.
 | [src/playtime.js](src/playtime.js) | Erfasst Sitzungen je Spieler-GUID |
 | [src/ranking.js](src/ranking.js) | Baut die Rangliste inkl. Blättern |
 | [src/rankingMessage.js](src/rankingMessage.js) | Dauerhafte Ranglisten-Nachricht |
+| [src/roles.js](src/roles.js) | Rollen-Konfiguration, Knöpfe, Rangfolge-Prüfung |
+| [src/rolesMessage.js](src/rolesMessage.js) | Dauerhafte Rollen-Nachricht |
+| [src/welcome.js](src/welcome.js) | Willkommensnachricht mit Platzhaltern |
 | [src/channel.js](src/channel.js) | Channel auflösen und Rechte prüfen |
 | [deploy/install-service.sh](deploy/install-service.sh) | Richtet den systemd-Dienst passend zur Umgebung ein |
 | [deploy/status-bot.service](deploy/status-bot.service) | Unit-Vorlage für die manuelle Installation |

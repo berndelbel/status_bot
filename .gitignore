@@ -3,3 +3,7 @@ node_modules/
 data/
 scripts/preview*.png
 *.log
+
+# Eigene Rollenkonfiguration - die Vorlage bleibt im Repo
+config/roles.json
+config/welcome.json

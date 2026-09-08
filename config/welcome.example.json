@@ -1,0 +1,30 @@
+{
+  "title": "👋 Willkommen auf {server}!",
+  "description": "Schön, dass du da bist, {user}!\n\nSchau dich in Ruhe um und hol dir deine Rollen, damit du nichts verpasst.",
+  "color": null,
+  "mentionUser": true,
+  "showAvatar": true,
+  "showMemberCount": true,
+  "showAccountAge": true,
+  "image": null,
+  "fields": [
+    {
+      "name": "📜 Erste Schritte",
+      "value": "Lies dir kurz die Regeln durch, dann kann es losgehen.",
+      "inline": false
+    },
+    {
+      "name": "🎮 Serveradresse",
+      "value": "```\n{serverip}\n```",
+      "inline": false
+    }
+  ],
+  "footer": "Viel Spaß auf dem Server!",
+  "_hinweis": [
+    "Platzhalter: {user} = Erwähnung, {username} = Anzeigename, {server} = Servername,",
+    "{count} = Mitgliederzahl, {serverip} = IP:Port aus der .env.",
+    "Auf Channels verlinkst du mit <#CHANNELID>, auf Rollen mit <@&ROLLENID>.",
+    "color: null nimmt die ACCENT_COLOR aus der .env, sonst z. B. \"#5865F2\".",
+    "image: null oder eine vollständige https-URL für ein Banner unten im Embed."
+  ]
+}

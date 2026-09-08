@@ -2,7 +2,7 @@ import { DiscordAPIError } from 'discord.js';
 import { config } from './config.js';
 import { log, describeError } from './logger.js';
 import { getMeta, setMeta, deleteMeta } from './db.js';
-import { resolveTextChannel } from './channel.js';
+import { resolveTextChannel, fetchMessageOrNull } from './channel.js';
 import { buildStatusMessage } from './embed.js';
 import { getLastState } from './monitor.js';
 
@@ -22,7 +22,7 @@ async function getOrCreateMessage(channel, payload) {
     log.info('Status-Channel hat sich geaendert - lege eine neue Nachricht an.');
     deleteMeta(META_MESSAGE);
   } else if (storedId) {
-    const existing = await channel.messages.fetch(storedId).catch(() => null);
+    const existing = await fetchMessageOrNull(channel, storedId);
     if (existing) return existing;
     log.warn('Bisherige Status-Nachricht wurde geloescht - erstelle eine neue.');
   }

@@ -115,8 +115,19 @@ export const config = {
   // --- Spielzeit-Rangliste ---
   rankingChannelId: str('RANKING_CHANNEL_ID'),
   rankingDays: int('RANKING_DAYS', 30, { min: 1, max: 365 }),
-  rankingUpdateInterval: int('RANKING_UPDATE_INTERVAL', 600, { min: 60, max: 86400 }),
+  rankingUpdateInterval: int('RANKING_UPDATE_INTERVAL', 300, { min: 30, max: 86400 }),
   rankingPageSize: int('RANKING_PAGE_SIZE', 10, { min: 5, max: 25 }),
+
+  // --- Reaction Roles ---
+  rolesChannelId: str('ROLES_CHANNEL_ID'),
+  rolesFile: str('ROLES_FILE', './config/roles.json'),
+
+  // --- Willkommensnachricht ---
+  // Achtung: Wenn gesetzt, braucht der Bot den privilegierten Intent
+  // "Server Members" im Developer Portal.
+  welcomeChannelId: str('WELCOME_CHANNEL_ID'),
+  welcomeFile: str('WELCOME_FILE', './config/welcome.json'),
+  welcomeGreetBots: bool('WELCOME_GREET_BOTS', false),
 
   // --- Verhalten ---
   pollInterval: int('POLL_INTERVAL', 60, { min: 15, max: 3600 }),

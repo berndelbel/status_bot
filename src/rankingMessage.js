@@ -2,7 +2,7 @@ import { DiscordAPIError } from 'discord.js';
 import { config } from './config.js';
 import { log, describeError } from './logger.js';
 import { getMeta, setMeta, deleteMeta } from './db.js';
-import { resolveTextChannel } from './channel.js';
+import { resolveTextChannel, fetchMessageOrNull, PERMS } from './channel.js';
 import { buildRankingMessage } from './ranking.js';
 
 export const META_RANK_MESSAGE = 'ranking_message_id';
@@ -19,7 +19,7 @@ async function getOrCreateMessage(channel, payload) {
     log.info('Ranglisten-Channel hat sich geändert - lege eine neue Nachricht an.');
     deleteMeta(META_RANK_MESSAGE);
   } else if (storedId) {
-    const existing = await channel.messages.fetch(storedId).catch(() => null);
+    const existing = await fetchMessageOrNull(channel, storedId);
     if (existing) return existing;
     log.warn('Bisherige Ranglisten-Nachricht wurde gelöscht - erstelle eine neue.');
   }
@@ -38,7 +38,7 @@ export async function updateRankingMessage(client) {
   updating = true;
 
   try {
-    const channel = await resolveTextChannel(client, config.rankingChannelId, 'Rangliste');
+    const channel = await resolveTextChannel(client, config.rankingChannelId, 'Rangliste', PERMS.embedPersistent);
     if (!channel) return;
 
     // Die dauerhafte Nachricht zeigt immer die erste Seite. Wer weiterblättert,

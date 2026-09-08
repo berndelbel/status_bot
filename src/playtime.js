@@ -16,12 +16,15 @@ export const playtime = new EventEmitter();
 let rcon = null;
 let pollTimer = null;
 let reconnectTimer = null;
+let watchdogTimer = null;
 let stopped = true;
 let backoff = 5_000;
 let onlinePlayers = [];
 let lastSuccess = 0;
+let stalled = false;
 
 const MAX_BACKOFF = 5 * 60_000;
+const WATCHDOG_INTERVAL = 30_000;
 
 export function getOnlinePlayers() {
   return onlinePlayers;
@@ -51,16 +54,62 @@ export function startPlaytimeTracking() {
   // Ausfallzeit als Spielzeit anzurechnen.
   closeStaleSessions();
   void connect();
+  startWatchdog();
 }
 
 export function stopPlaytimeTracking() {
   stopped = true;
   if (pollTimer) clearInterval(pollTimer);
   if (reconnectTimer) clearTimeout(reconnectTimer);
+  if (watchdogTimer) clearInterval(watchdogTimer);
   pollTimer = null;
   reconnectTimer = null;
+  watchdogTimer = null;
   rcon?.close();
   rcon = null;
+}
+
+/**
+ * Wachhund gegen stille Aussetzer.
+ *
+ * Die Spielzeit waechst nur, solange Abfragen durchlaufen. Bleibt die
+ * Verbindung haengen, ohne dass ein Fehler auftritt, wuerden die Zahlen
+ * einfrieren - sichtbar erst Stunden spaeter. Deshalb wird hier aktiv geprueft,
+ * ob ueberhaupt noch Daten ankommen, und im Zweifel neu verbunden.
+ */
+function startWatchdog() {
+  if (watchdogTimer) clearInterval(watchdogTimer);
+  watchdogTimer = setInterval(() => {
+    if (stopped || lastSuccess === 0) return;
+
+    const stillMs = Date.now() - lastSuccess;
+    const grenzeMs = Math.max(config.rconPollInterval * 3, 120) * 1000;
+
+    if (stillMs > grenzeMs) {
+      log.warn(
+        `RCon-Wachhund: seit ${Math.round(stillMs / 1000)} s keine erfolgreiche Abfrage ` +
+          `(verbunden laut Client: ${isRconConnected() ? 'ja' : 'nein'}) - baue neu auf.`
+      );
+      stalled = true;
+      forceReconnect();
+    }
+  }, WATCHDOG_INTERVAL);
+}
+
+/** Verbindung hart neu aufbauen, ohne auf den Backoff zu warten. */
+function forceReconnect() {
+  if (pollTimer) clearInterval(pollTimer);
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  pollTimer = null;
+  reconnectTimer = null;
+  try {
+    rcon?.close();
+  } catch {
+    /* war schon zu */
+  }
+  rcon = null;
+  backoff = 5_000;
+  void connect();
 }
 
 async function connect() {
@@ -130,6 +179,10 @@ async function pollPlayers() {
   }
 
   const ts = Math.floor(Date.now() / 1000);
+  if (stalled) {
+    log.ok('RCon-Abfrage laeuft wieder.');
+    stalled = false;
+  }
   lastSuccess = Date.now();
 
   // Spieler ohne gueltige GUID (noch im Verbindungsaufbau) zaehlen nicht mit.

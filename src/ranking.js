@@ -5,9 +5,18 @@ import { discordTime } from './stats.js';
 
 const NAME_WIDTH = 20;
 
-/** Stunden mit einer Nachkommastelle, deutsche Schreibweise. */
+/**
+ * Spielzeit lesbar machen.
+ *
+ * Reine Stundenangaben mit einer Nachkommastelle sind am Anfang wertlos: alles
+ * unter drei Minuten wuerde als "0,0" erscheinen. Deshalb waechst die Einheit
+ * mit der Dauer mit.
+ */
 function hours(seconds) {
-  return (seconds / 3600).toFixed(1).replace('.', ',');
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.round(s / 60)} Min`;
+  return `${(s / 3600).toFixed(1).replace('.', ',')} h`;
 }
 
 /**
@@ -79,7 +88,7 @@ export function buildRankingMessage(page = 1) {
     return { embeds: [embed], components: [] };
   }
 
-  const header = ` ${pad('#', 3, true)}  ${pad('Spieler', NAME_WIDTH)}  ${pad('Stunden', 8, true)}  ${pad('Sitz.', 6, true)}`;
+  const header = ` ${pad('#', 3, true)}  ${pad('Spieler', NAME_WIDTH)}  ${pad('Zeit', 8, true)}  ${pad('Sitz.', 6, true)}`;
   const divider = '─'.repeat(header.length);
 
   const lines = rows.map((row, i) => {
@@ -89,7 +98,7 @@ export function buildRankingMessage(page = 1) {
 
   embed.setDescription(
     [
-      `**Letzte ${days} Tage** · ${totalPlayers} Spieler · ${hours(totalSeconds)} Stunden gesamt`,
+      `**Letzte ${days} Tage** · ${totalPlayers} Spieler · ${hours(totalSeconds)} gesamt`,
       '',
       '```',
       header,
@@ -106,7 +115,7 @@ export function buildRankingMessage(page = 1) {
       name: 'Podest',
       value: rows
         .slice(0, 3)
-        .map((r, i) => `${medals[i]} **${safeName(r.name)}** — ${hours(r.seconds)} h`)
+        .map((r, i) => `${medals[i]} **${safeName(r.name)}** — ${hours(r.seconds)}`)
         .join('\n'),
       inline: false,
     });

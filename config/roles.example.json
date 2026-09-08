@@ -1,0 +1,40 @@
+{
+  "title": "Wähle deine Rollen",
+  "description": "Klick auf einen Knopf, um dir die Rolle zu geben. Nochmal klicken nimmt sie wieder weg.",
+  "groups": [
+    {
+      "name": "🔔 Benachrichtigungen",
+      "roles": [
+        {
+          "id": "HIER_ROLLEN_ID_EINTRAGEN",
+          "label": "Server-News",
+          "emoji": "📢",
+          "description": "Ankündigungen zu Wipes, Updates und Wartungen"
+        },
+        {
+          "id": "HIER_ROLLEN_ID_EINTRAGEN",
+          "label": "Events",
+          "emoji": "🎯",
+          "description": "Ping bei Events und Aktionen auf dem Server"
+        }
+      ]
+    },
+    {
+      "name": "🎮 Spielstil",
+      "roles": [
+        {
+          "id": "HIER_ROLLEN_ID_EINTRAGEN",
+          "label": "PvP",
+          "emoji": "⚔️",
+          "description": "Sucht Kämpfe"
+        },
+        {
+          "id": "HIER_ROLLEN_ID_EINTRAGEN",
+          "label": "Base Building",
+          "emoji": "🏠",
+          "description": "Baut lieber"
+        }
+      ]
+    }
+  ]
+}

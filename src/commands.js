@@ -13,6 +13,9 @@ import { buildStatusMessage, buildRangeMessage } from './embed.js';
 import { buildRankingMessage } from './ranking.js';
 import { updateStatusMessage, META_MESSAGE } from './statusMessage.js';
 import { updateRankingMessage, META_RANK_MESSAGE } from './rankingMessage.js';
+import { updateRolesMessage, META_ROLES_MESSAGE } from './rolesMessage.js';
+import { buildRolesMessage, findRole, loadRolesConfig } from './roles.js';
+import { buildWelcomeMessage, loadWelcomeConfig, sendWelcome } from './welcome.js';
 import { getOnlinePlayers, isRconConnected } from './playtime.js';
 import { deleteMeta } from './db.js';
 import { RANGES, collectStats, formatDuration, formatPercent, discordTime } from './stats.js';
@@ -52,6 +55,16 @@ export const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName('willkommen')
+    .setDescription('Testet die Willkommensnachricht (nur Admins)')
+    .addBooleanOption((o) =>
+      o
+        .setName('senden')
+        .setDescription('Wirklich in den Willkommens-Channel posten statt nur Vorschau?')
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+
+  new SlashCommandBuilder()
     .setName('statusnachricht')
     .setDescription('Erstellt eine dauerhafte Nachricht neu (nur Admins)')
     .addStringOption((o) =>
@@ -61,7 +74,8 @@ export const commands = [
         .addChoices(
           { name: 'Status', value: 'status' },
           { name: 'Rangliste', value: 'ranking' },
-          { name: 'Beide', value: 'both' }
+          { name: 'Rollen', value: 'roles' },
+          { name: 'Alle', value: 'both' }
         )
     )
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
@@ -75,6 +89,14 @@ export async function registerCommands() {
         body: commands,
       });
       log.ok(`${commands.length} Slash-Commands für Server ${config.guildId} registriert`);
+
+      // Frueher global registrierte Befehle wuerden sonst doppelt im Menue
+      // stehen - Discord zeigt globale und Server-Befehle nebeneinander an.
+      const global = await rest.get(Routes.applicationCommands(config.clientId)).catch(() => []);
+      if (Array.isArray(global) && global.length > 0) {
+        await rest.put(Routes.applicationCommands(config.clientId), { body: [] });
+        log.info(`${global.length} global registrierte Befehle entfernt (wären Duplikate).`);
+      }
     } else {
       await rest.put(Routes.applicationCommands(config.clientId), { body: commands });
       log.ok(`${commands.length} Slash-Commands global registriert (bis zu 1 Std Verzögerung)`);
@@ -152,6 +174,38 @@ async function handleCommand(interaction, client) {
       return interaction.editReply(buildRankingMessage(page));
     }
 
+    case 'willkommen': {
+      await interaction.deferReply({ flags: EPHEMERAL });
+      if (!interaction.inGuild() || !interaction.member) {
+        return interaction.editReply({ content: 'Das geht nur auf einem Server.' });
+      }
+
+      // Konfiguration frisch laden, damit Aenderungen sofort sichtbar sind.
+      loadWelcomeConfig({ force: true });
+
+      // Mit "senden" wird derselbe Weg genommen wie bei einem echten Beitritt -
+      // inklusive Channel-Auflösung und Rechteprüfung. Nur so faellt auf, wenn
+      // dem Bot im Willkommens-Channel etwas fehlt.
+      if (interaction.options.getBoolean('senden')) {
+        const ergebnis = await sendWelcome(client, interaction.member);
+        return interaction.editReply({
+          content: ergebnis.ok
+            ? `✅ Gesendet: ${ergebnis.url}`
+            : `❌ Nicht gesendet.\n${ergebnis.grund}`,
+        });
+      }
+
+      const vorschau = buildWelcomeMessage(interaction.member);
+      const hinweis = config.welcomeChannelId
+        ? `Vorschau mit deinem eigenen Profil. Mit \`senden:true\` wird der echte Weg nach <#${config.welcomeChannelId}> getestet.`
+        : '⚠️ `WELCOME_CHANNEL_ID` ist nicht gesetzt - es werden keine Nachrichten gepostet.';
+
+      return interaction.editReply({
+        content: hinweis,
+        embeds: vorschau.embeds,
+      });
+    }
+
     case 'statusnachricht': {
       await interaction.deferReply({ flags: EPHEMERAL });
       const which = interaction.options.getString('welche') ?? 'status';
@@ -161,6 +215,25 @@ async function handleCommand(interaction, client) {
         deleteMeta(META_MESSAGE);
         await updateStatusMessage(client);
         done.push('Status-Nachricht');
+      }
+      if (which === 'roles' || which === 'both') {
+        if (!config.rolesChannelId) {
+          if (which === 'roles') {
+            return interaction.editReply({
+              content: '⚠️ Es ist keine `ROLES_CHANNEL_ID` konfiguriert.',
+            });
+          }
+        } else if (!loadRolesConfig({ force: true })) {
+          if (which === 'roles') {
+            return interaction.editReply({
+              content: '⚠️ Die Rollendatei fehlt oder enthält keine gültigen Rollen. Details stehen im Log.',
+            });
+          }
+        } else {
+          deleteMeta(META_ROLES_MESSAGE);
+          await updateRolesMessage(client);
+          done.push('Rollen-Nachricht');
+        }
       }
       if (which === 'ranking' || which === 'both') {
         if (!config.rankingChannelId) {
@@ -196,6 +269,11 @@ async function handleButton(interaction, client) {
     return interaction.reply({ ...payload, flags: EPHEMERAL });
   }
   if (interaction.customId === 'rank:noop') return interaction.deferUpdate();
+
+  // Rolle an- oder abwaehlen.
+  if (interaction.customId.startsWith('role:toggle:')) {
+    return handleRoleToggle(interaction);
+  }
 
   switch (interaction.customId) {
     case 'status:refresh': {
@@ -240,6 +318,63 @@ async function handleSelect(interaction) {
   await interaction.deferReply({ flags: EPHEMERAL });
   const key = interaction.values[0];
   return interaction.editReply(buildRangeMessage(key, getLastState()));
+}
+
+/**
+ * Vergibt eine Rolle oder nimmt sie wieder weg.
+ * Antwortet immer privat, damit der Channel sauber bleibt.
+ */
+async function handleRoleToggle(interaction) {
+  const roleId = interaction.customId.split(':')[2];
+  const eintrag = findRole(roleId);
+
+  if (!interaction.inGuild() || !interaction.guild) {
+    return interaction.reply({ content: 'Das geht nur auf einem Server.', flags: EPHEMERAL });
+  }
+  if (!eintrag) {
+    return interaction.reply({
+      content: '⚠️ Diese Rolle steht nicht mehr in der Konfiguration. Ein Admin muss die Nachricht mit `/statusnachricht welche:Rollen` erneuern.',
+      flags: EPHEMERAL,
+    });
+  }
+
+  await interaction.deferReply({ flags: EPHEMERAL });
+
+  const member = interaction.member;
+  const hatSie = member.roles.cache.has(roleId);
+
+  try {
+    if (hatSie) await member.roles.remove(roleId, 'Rollen-Nachricht');
+    else await member.roles.add(roleId, 'Rollen-Nachricht');
+  } catch (err) {
+    log.error(`Rolle ${roleId} konnte nicht geändert werden:`);
+    log.error(describeError(err));
+
+    // 50013 = Missing Permissions. Bei Rollen liegt das fast immer an der Rangfolge.
+    const hierarchie = err?.code === 50013;
+    return interaction.editReply({
+      content: hierarchie
+        ? [
+            `⚠️ Ich darf **${eintrag.label}** nicht vergeben.`,
+            '',
+            '-# Die Bot-Rolle muss in den Servereinstellungen **über** dieser Rolle stehen, und der Bot braucht das Recht „Rollen verwalten".',
+          ].join('\n')
+        : '⚠️ Das hat nicht geklappt. Ein Admin findet den Grund im Log.',
+    });
+  }
+
+  // Persoenliche Uebersicht: hier zeigen die Haken den eigenen Stand.
+  const eigene = new Set(member.roles.cache.keys());
+  if (hatSie) eigene.delete(roleId);
+  else eigene.add(roleId);
+
+  const uebersicht = buildRolesMessage(eigene);
+  return interaction.editReply({
+    content: hatSie
+      ? `➖ **${eintrag.label}** wurde entfernt.`
+      : `✅ **${eintrag.label}** wurde dir gegeben.`,
+    embeds: uebersicht ? uebersicht.embeds : [],
+  });
 }
 
 // ------------------------------------------------------------------ Embeds

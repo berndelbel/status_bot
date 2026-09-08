@@ -16,7 +16,11 @@
     "diag:rcon": "node --disable-warning=ExperimentalWarning scripts/diag-rcon.js",
     "diag:players": "node --disable-warning=ExperimentalWarning scripts/diag-players.js",
     "selftest:ranking": "node --disable-warning=ExperimentalWarning scripts/selftest-ranking.js",
-    "selftest:rcon": "node scripts/selftest-rcon-parse.js"
+    "selftest:rcon": "node scripts/selftest-rcon-parse.js",
+    "diag:sessions": "node --disable-warning=ExperimentalWarning scripts/diag-sessions.js",
+    "selftest:updater": "node --disable-warning=ExperimentalWarning scripts/selftest-updater.js",
+    "selftest:roles": "node --disable-warning=ExperimentalWarning scripts/selftest-roles.js",
+    "selftest:welcome": "node --disable-warning=ExperimentalWarning scripts/selftest-welcome.js"
   },
   "license": "MIT",
   "dependencies": {
